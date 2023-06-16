@@ -24,25 +24,27 @@ engine = create_engine('sqlite:///convertationbd.db')
 Session = sessionmaker(bind=engine)
 session = Session()
 
+from fastapi import HTTPException
+import os
+
 @app.post("/convert")
 async def convert_file(file: UploadFile = FastAPIFile(...), target_format: str = Form(...)):
     # Генерация айди файла
     file_id = str(uuid.uuid4())
 
-    if file:
-        # Сохранение файла на S3
-        bucket_name = "my-bucket"
-        key = f"{file_id}/{file.filename}"
-        with open(file.filename, "wb") as f:
-            contents = await file.read()
-            f.write(contents)
-        upload_file(file.filename, bucket_name, key)
-    else:
-        # Загрузка файла с S3
-        bucket_name = "my-bucket"
-        key = "<S3 key of the existing file>"
-        file_path = f"/tmp/{file_id}"
-        download_file(bucket_name, key, file_path)
+    # Сохранение файла на S3
+    bucket_name = "my-bucket"
+    key = f"{file_id}/{file.filename}"
+    file_path = f"/tmp/{file_id}"
+
+    with open(file_path, "wb") as f:
+        contents = await file.read()
+        f.write(contents)
+
+    upload_file(file_path, bucket_name, key)
+
+    # Удаление временного файла
+    os.remove(file_path)
 
     # Сохранение информации о файле и задаче в базе данных
     file = FileModel(filename=file.filename, file_type=target_format)
@@ -56,8 +58,10 @@ async def convert_file(file: UploadFile = FastAPIFile(...), target_format: str =
     # Отправка задачи в Kafka
     task_data = jsonable_encoder(task)
     producer.send("conversion_tasks", json.dumps(task_data).encode())
-    
+
     return {"file_id": file_id, "message": "Task scheduled"}
+
+
 
 
 @app.get("/file/{file_id}")
