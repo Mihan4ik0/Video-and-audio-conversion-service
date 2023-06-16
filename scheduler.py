@@ -1,5 +1,5 @@
 import uuid
-from fastapi import FastAPI, UploadFile, File as FastAPIFile, Form
+from fastapi import FastAPI, UploadFile, File as FastAPIFile, Form, HTTPException
 from pydantic import BaseModel
 from kafka import KafkaProducer
 from sqlalchemy import create_engine
@@ -8,7 +8,9 @@ from models import File as FileModel, Task
 from s3 import upload_file, download_file, check_file_exists
 import json
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+import sys
+
 
 app = FastAPI()
 
@@ -47,7 +49,7 @@ async def convert_file(file: UploadFile = FastAPIFile(...), target_format: str =
     os.remove(file_path)
 
     # Сохранение информации о файле и задаче в базе данных
-    file = FileModel(filename=file.filename, file_type=target_format)
+    file = FileModel(filename=file.filename, file_type=target_format, s3_id=file_id)
     session.add(file)
     session.commit()
 
@@ -67,18 +69,24 @@ async def convert_file(file: UploadFile = FastAPIFile(...), target_format: str =
 @app.get("/file/{file_id}")
 async def get_file(file_id: str):
     # Получение информации о файле из базы данных
-    file = session.query(FileModel).filter_by(id=file_id).first()
+    file = session.query(FileModel).filter_by(s3_id=file_id).first()
     if not file:
-        return {"message": "File not found"}
+        error_message = "File not found"
+        print(f"Error: {error_message}")
+        return Response(content=error_message, media_type="text/plain", status_code=404)
 
     # Получение информации о задании из базы данных
-    task = session.query(Task).filter_by(file_id=file_id).first()
+    task = session.query(Task).filter_by(file_id=file.id).first()
     if not task:
-        return {"message": "Task not found"}
+        error_message = "Task not found"
+        print(f"Error: {error_message}")
+        return Response(content=error_message, media_type="text/plain", status_code=404)
 
     # Если задание не завершено, возвращаем уведомление
     if task.status != "Complete":
-        return {"message": "Task is not complete. Current status: " + task.status}
+        error_message = f"Task is not complete. Current status: {task.status}"
+        print(f"Error: {error_message}")
+        return Response(content=error_message, media_type="text/plain", status_code=400)
 
     # Загрузка файла с S3
     bucket_name = "my-bucket"
@@ -87,15 +95,20 @@ async def get_file(file_id: str):
     
     # Проверка существования файла
     if not check_file_exists(bucket_name, key):
-        return {"message": "File does not exist"}
+        error_message = "File does not exist"
+        print(f"Error: {error_message}")
+        return Response(content=error_message, media_type="text/plain", status_code=404)
 
     try:
         download_file(bucket_name, key, file_path)
     except Exception as e:
-        return {"message": f"Failed to download file: {str(e)}"}
+        error_message = f"Failed to download file: {str(e)}"
+        print(f"Error: {error_message}")
+        return Response(content=error_message, media_type="text/plain", status_code=500)
 
     # Возврат файла как ответа
     return FileResponse(file_path, filename=file.filename)
+
 
 
 

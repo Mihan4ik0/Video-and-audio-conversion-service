@@ -11,6 +11,7 @@ class File(Base):
     id = Column(Integer, primary_key=True)
     filename = Column(String)
     file_type = Column(String)
+    s3_id = Column(String)
     created_at = Column(DateTime, default=func.now())
 
 class Task(Base):
