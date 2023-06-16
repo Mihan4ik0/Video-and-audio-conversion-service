@@ -9,25 +9,25 @@ from s3 import upload_file, download_file, check_file_exists
 import json
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, Response
-import sys
-
+from settings import Settings
 
 app = FastAPI()
+
+# Загрузка настроек
+settings = Settings()
 
 class ConversionTask(BaseModel):
     file_id: str
     target_format: str
 
 # Создание Kafka-производителя
-producer = KafkaProducer(bootstrap_servers="localhost:9092")
+producer = KafkaProducer(bootstrap_servers=settings.kafka_bootstrap_servers)
 
 # Создание соединения с базой данных
-engine = create_engine('sqlite:///convertationbd.db')
+db_url = f"postgresql://{settings.db_username}:{settings.db_password}@{settings.db_host}:{settings.db_port}/{settings.db_name}"
+engine = create_engine(db_url)
 Session = sessionmaker(bind=engine)
 session = Session()
-
-from fastapi import HTTPException
-import os
 
 @app.post("/convert")
 async def convert_file(file: UploadFile = FastAPIFile(...), target_format: str = Form(...)):
@@ -35,18 +35,9 @@ async def convert_file(file: UploadFile = FastAPIFile(...), target_format: str =
     file_id = str(uuid.uuid4())
 
     # Сохранение файла на S3
-    bucket_name = "my-bucket"
+    bucket_name = settings.s3_bucket_name
     key = f"{file_id}/{file.filename}"
-    file_path = f"/tmp/{file_id}"
-
-    with open(file_path, "wb") as f:
-        contents = await file.read()
-        f.write(contents)
-
-    upload_file(file_path, bucket_name, key)
-
-    # Удаление временного файла
-    os.remove(file_path)
+    upload_file(file.file, bucket_name, key)
 
     # Сохранение информации о файле и задаче в базе данных
     file = FileModel(filename=file.filename, file_type=target_format, s3_id=file_id)
@@ -65,50 +56,43 @@ async def convert_file(file: UploadFile = FastAPIFile(...), target_format: str =
 
 
 
-
 @app.get("/file/{file_id}")
 async def get_file(file_id: str):
     # Получение информации о файле из базы данных
     file = session.query(FileModel).filter_by(s3_id=file_id).first()
     if not file:
         error_message = "File not found"
-        print(f"Error: {error_message}")
-        return Response(content=error_message, media_type="text/plain", status_code=404)
+        raise HTTPException(status_code=404, detail=error_message)
 
     # Получение информации о задании из базы данных
     task = session.query(Task).filter_by(file_id=file.id).first()
     if not task:
         error_message = "Task not found"
-        print(f"Error: {error_message}")
-        return Response(content=error_message, media_type="text/plain", status_code=404)
+        raise HTTPException(status_code=404, detail=error_message)
 
     # Если задание не завершено, возвращаем уведомление
     if task.status != "Complete":
         error_message = f"Task is not complete. Current status: {task.status}"
-        print(f"Error: {error_message}")
-        return Response(content=error_message, media_type="text/plain", status_code=400)
+        raise HTTPException(status_code=400, detail=error_message)
 
     # Загрузка файла с S3
-    bucket_name = "my-bucket"
+    bucket_name = settings.s3_bucket_name
     key = f"{file_id}/{file.filename}"
     file_path = f"/tmp/{file_id}"
     
     # Проверка существования файла
     if not check_file_exists(bucket_name, key):
         error_message = "File does not exist"
-        print(f"Error: {error_message}")
-        return Response(content=error_message, media_type="text/plain", status_code=404)
+        raise HTTPException(status_code=404, detail=error_message)
 
     try:
         download_file(bucket_name, key, file_path)
     except Exception as e:
         error_message = f"Failed to download file: {str(e)}"
-        print(f"Error: {error_message}")
-        return Response(content=error_message, media_type="text/plain", status_code=500)
+        raise HTTPException(status_code=500, detail=error_message)
 
     # Возврат файла как ответа
     return FileResponse(file_path, filename=file.filename)
-
 
 
 
