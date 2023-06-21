@@ -1,0 +1,19 @@
+# Базовый образ
+FROM python:3.10.7
+
+# Установка зависимостей
+RUN apt-get update && apt-get install -y ffmpeg
+
+# Создание директории приложения
+WORKDIR /app
+
+# Копирование исходного кода
+COPY . .
+COPY executor.py .
+
+# Установка зависимостей Python
+RUN pip install --no-cache-dir -r requirements.txt
+
+
+# Запуск исполнителя
+CMD ["python", "executor.py"]

@@ -1,11 +1,12 @@
 version: '3'
+
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:6.2.0
     ports:
       - 2181:2181
-    environment:
-      - ZOOKEEPER_CLIENT_PORT=2181
+    env_file:
+      - .env
     networks:
       - my-network
 
@@ -13,23 +14,20 @@ services:
     image: confluentinc/cp-kafka:6.2.0
     ports:
       - 9092:9092
-    environment:
-      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
-      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
-      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+    env_file:
+      - .env
     depends_on:
       - zookeeper
     networks:
       - my-network
 
+
   postgresql:
     image: postgres:latest
     ports:
       - 5433:5432
-    environment:
-      - POSTGRES_USER=tochnonadezhno
-      - POSTGRES_PASSWORD=tochnonadezhno
-      - POSTGRES_DB=convertationbd
+    env_file:
+      - .env
     volumes:
       - ./pgdata:/var/lib/postgresql/data
     networks:
@@ -40,38 +38,64 @@ services:
     ports:
       - 9000:9000
       - 9001:9001
-    environment:
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
+    env_file:
+      - .env
     volumes:
       - ./data:/data
     networks:
       - my-network
     command: server --address ":9000" --console-address ":9001" /data
 
-
   scheduler:
     image: scheduler:latest
     ports:
       - 8000:8000
     depends_on:
+      - zookeeper
       - postgresql
+      - kafka
       - minio
     volumes:
       - ./scheduler:/app/config
-    environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - S3_BUCKET_NAME=my-bucket
-      - S3_ACCESS_KEY=minioadmin
-      - S3_SECRET_KEY=minioadmin
-      - S3_ENDPOINT_URL=http://minio:9000
-      - DB_USERNAME=tochnonadezhno
-      - DB_HOST=postgresql
-      - DB_PORT=5432
-      - DB_NAME=convertationbd
+    env_file:
+      - .env
     networks:
       - my-network
-    command: bash -c 'sleep 5 && python scheduler.py'
+    command: bash -c 'sleep 10 && python -u scheduler.py'
+
+  converter-worker-1:
+    image: converter:latest
+    depends_on:
+      - zookeeper
+      - postgresql
+      - kafka
+      - minio
+    volumes:
+      - ./executor:/app
+    env_file:
+      - .env
+    networks:
+      - my-network
+    environment:
+      - PARTITION_NUMBER=0
+    command: bash -c 'sleep 10 && python -u executor.py'
+
+  converter-worker-2:
+    image: converter:latest
+    depends_on:
+      - zookeeper
+      - postgresql
+      - kafka
+      - minio
+    volumes:
+      - ./executor:/app
+    env_file:
+      - .env
+    networks:
+      - my-network
+    environment:
+      - PARTITION_NUMBER=1
+    command: bash -c 'sleep 10 && python -u executor.py'
 
 networks:
   my-network:
