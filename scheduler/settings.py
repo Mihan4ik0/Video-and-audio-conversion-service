@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     s3_secret_key: str
     s3_endpoint_url: str
     desired_hours: int
+    total_partitions: int
 
     class Config:
         env_file = ".env"

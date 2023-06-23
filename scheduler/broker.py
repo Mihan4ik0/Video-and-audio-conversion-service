@@ -13,11 +13,11 @@ producer = KafkaProducer(bootstrap_servers=settings.kafka_bootstrap_servers)
 
 def send_conversion_task(file_id: str):
     task = ConversionTaskBroker(file_id=file_id)
-    partition = get_next_partition()
+    partition = get_next_partition(total_partitions=settings.total_partitions)
     producer.send("conversion_tasks", task.json().encode(), partition=partition)
 
-def get_next_partition():
+def get_next_partition(total_partitions):
     current_partition = getattr(get_next_partition, "current_partition", 0)
-    next_partition = (current_partition + 1) % 2  # Чередование между двумя партициями
+    next_partition = (current_partition + 1) % total_partitions
     setattr(get_next_partition, "current_partition", next_partition)
     return next_partition
